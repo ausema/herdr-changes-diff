@@ -76,7 +76,9 @@ change marked, so a big file is easy to walk through.
 
 - **Which repo**: the panel follows the focused terminal's folder (also on a
   remote machine); while the Diff tab or another mod has the focus it keeps
-  the space's last location. It refreshes every 10 s and on every change the
+  the space's last location, which each space keeps for itself, so coming
+  back from another space with the Diff tab focused still shows the same
+  repo. It refreshes every 10 s and on every change the
   folder watch reports (local folders only).
 - **Several repos**: when the folder isn't inside a repo, `find <folder>
   -mindepth 2 -maxdepth 2 -name .git` gives the repos one level down,

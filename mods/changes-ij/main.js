@@ -19,10 +19,10 @@ const FIND_TIMEOUT_MS = 2000;
 const NO_COMMITS = { commits: [], limited: false };
 const STATUS_ARGS = ["status", "--porcelain=v1", "-z", "--branch", "--no-renames", "--untracked-files=all"];
 
-function location(previous) {
+function location(previousBySpace) {
   const space = spaces().find((s) => s.active), f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
-  return resolveLocation({ space, focused: f, pane, previous });
+  return resolveLocation({ space, focused: f, pane, previousBySpace });
 }
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
 // the folder watch would see it, and every refresh would start the next one.
@@ -132,7 +132,7 @@ function statusColor(status, t) {
 
 export default class Changes extends View {
   init(_props, cx) {
-    this.message = ""; this.handle = cx.focus_handle();
+    this.message = ""; this.handle = cx.focus_handle(); this.placeBySpace = new Map();
     this.clearRepos(); this.resetFolds();
     this.input = InputState.new({ placeholder: "Commit message" });
     this.input.on("change", (_e, cx) => {
@@ -203,8 +203,9 @@ export default class Changes extends View {
   }
 
   where() {
-    this.place = location(this.place);
-    return this.place;
+    const place = location(this.placeBySpace);
+    this.placeBySpace.set(place.space, place);
+    return place;
   }
 
   key() { return JSON.stringify(this.where()); }
