@@ -20,6 +20,10 @@ change marked, so a big file is easy to walk through.
   - `▾ Local changes (N)` group (semibold title, `muted` arrow, its `+`/`−`):
     one row per uncommitted file, untracked ones included; `No uncommitted
     changes` in `dim` when empty.
+  - Checkboxes (one repo only): 14 px, rounded 3 px, 1 px `border`; checked
+    ones filled with `accent` and a `✓` in `accent_foreground`. One before
+    each local file's status letter, and one after the `Local changes`
+    arrow for all of them (`✓` all, `–` some, empty none).
   - Then one group per unpushed commit, newest first: arrow, short sha in
     `dim` 11 px, the subject in semibold, its `+`/`−`. Its files are indented
     14 px.
@@ -29,8 +33,10 @@ change marked, so a big file is easy to walk through.
   - The open file's row has the `selected` background; rows get `hover` on
     hover.
 - **Commit box** at the bottom: a 1 px `border` line on top, 10 px padding, a
-  32 px input `Commit message` (border turns `accent` while typing) and a
-  `Commit` button (`solid` / `solid_foreground` when there is a message,
+  multi-line message field (at least 32 px, growing from 1 to 6 rows,
+  placeholder `Commit message (⌘Enter to commit)`, border turns `accent`
+  while typing) and a `Commit` button aligned to its bottom (`solid` /
+  `solid_foreground` when there is a message and a checked file,
   `raised` / `dim` otherwise; `Committing…` while it runs). Errors show in
   `ansi1` 11 px above it.
 - **A folder of several repos** (the folder isn't a repo, its subfolders
@@ -94,8 +100,15 @@ change marked, so a big file is easy to walk through.
 - **Click a file**: selects its row and opens the `Diff` tab of the active
   space (selects it if a tab named `Diff` exists, else creates it focused).
   Clicking the same file again reloads it.
-- **Commit**: Enter in the input or the button runs `git add -A` then
-  `git commit -m <message>` in the repo root; the message clears on success.
+- **Commit**: Enter adds a line to the message; `Cmd+Enter` (`Ctrl+Enter`
+  off macOS) or the button runs `git add -A -- <checked files>` then
+  `git commit -m <message> -- <checked files>` in the repo root, both with
+  `--literal-pathspecs`. Only the checked files are committed: unchecked
+  ones and anything else already staged stay out. The message clears on
+  success.
+- **Checkboxes**: every local file starts checked. Unchecking one keeps it
+  out of later commits too, while the panel is open; the header checkbox
+  checks all unless all are checked, then unchecks all.
   Not offered for a folder of several repos.
   `Escape` while typing leaves the input.
 - **Diff contents**: a local file is diffed against `HEAD` with the whole file
@@ -116,7 +129,8 @@ change marked, so a big file is easy to walk through.
 - Two mods, no layout and no `keys.json`:
   - `mods/changes-ij/`: `main.js` (the panel view), `commits.js` (unpushed
     commits: `git log` / `git show --raw --numstat` args and parsers),
-    `repos.js` (a folder of several repos: `find` args, `status --branch`
+    `staging.js` (which files the Commit button commits, and its git
+    commands), `repos.js` (a folder of several repos: `find` args, `status --branch`
     parser, the quiet check, bounded parallel loading),
     `location.js` (which folder to follow), `changes.svg`, tests. `mod.json`:
     `"place": "none"`, cloned from Herdr's shipped `changes` 0.1.17.
@@ -130,11 +144,11 @@ change marked, so a big file is easy to walk through.
 - `herdr`: `spaces`, `panes`, `focused`, `exec`, `watchFolder`, `readTextFile`,
   `theme`, `settings`, `run` (`tab.select`, `tab.new {name, mod, focus}`),
   `setShared`/`shared`, `nextCommand`. `gpui-base`: `v_flex`, `h_flex`,
-  `Scrollbar`, `Input`/`InputState`, `v_virtual_list`,
+  `Scrollbar`, `Textarea`/`TextareaState`, `v_virtual_list`,
   `VirtualListScrollHandle`.
 - Programs: `find` (a folder of several repos) and `git` (read-only commands with `--no-optional-locks -c
   core.fsmonitor=false -c diff.autoRefreshIndex=false`, plus `add -A` and
-  `commit` from the Commit button). No network.
+  `commit` of the checked files from the Commit button). No network.
 
 ## Watch out
 
@@ -151,8 +165,10 @@ change marked, so a big file is easy to walk through.
 - Theme colors are appended a two-digit hex alpha: they must be `#rrggbb`.
 - Limits: 1,000 files, 50 unpushed commits, 5,000 diff rows, 4,000 columns
   per line, 400,000 characters of an untracked file.
-- The Commit button stages everything (`git add -A`); there is no partial
-  staging, revert or editing from the diff.
+- The Commit button commits whole files: a checked file goes in as it is
+  on disk, even if only some of its hunks were staged. There is no
+  revert or editing from the diff. Past the first 1,000 changed files,
+  the rest can't be checked, so they are never committed from here.
 - Several repos: only one level down is searched; a folder that is itself
   inside a repo (a home folder kept in git) shows that repo instead. A repo
   with no remote lists its commits as unpushed (up to 50), as in a single
@@ -176,3 +192,7 @@ change marked, so a big file is easy to walk through.
   opens its diff.
 - Saving the file changes the diff without picking it again; typing a message
   and pressing Commit empties `Local changes` and adds a commit group.
+- With an edited and an untracked file, unchecking the untracked one sets
+  the header box to `–`; a two-line message (Enter between them) committed
+  with `Cmd+Enter` keeps both lines, and the untracked file stays in
+  `Local changes`, still unchecked.

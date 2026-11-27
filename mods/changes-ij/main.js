@@ -1,8 +1,9 @@
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
+import { v_flex, h_flex, TextareaState, Textarea, Scrollbar } from "gpui-base";
 import { spaces, panes, focused, exec, watchFolder, theme, run, setShared } from "herdr";
 import { resolveLocation } from "./location.js";
 import { MAX_COMMITS, logArgs, parseLog, commitFilesArgs, parseCommitFiles, rowKey } from "./commits.js";
+import { includedPaths, checkState, commitCommands, isCommitKey } from "./staging.js";
 import { findReposArgs, repoRoots, repoName, parseStatus, isQuiet, groupKey, mapWithLimit } from "./repos.js";
 
 const DIFF_MOD = "diff-ij";
@@ -17,6 +18,8 @@ const REPO_INDENT = 14;
 const REPOS_IN_PARALLEL = 4;
 const FIND_TIMEOUT_MS = 2000;
 const NO_COMMITS = { commits: [], limited: false };
+const MESSAGE_ROWS = { min: 1, max: 6 };
+const CHECK_GLYPH = { all: "✓", some: "–", none: "" };
 const STATUS_ARGS = ["status", "--porcelain=v1", "-z", "--branch", "--no-renames", "--untracked-files=all"];
 
 function location(previousBySpace) {
@@ -134,13 +137,20 @@ export default class Changes extends View {
   init(_props, cx) {
     this.message = ""; this.handle = cx.focus_handle(); this.placeBySpace = new Map();
     this.clearRepos(); this.resetFolds();
-    this.input = InputState.new({ placeholder: "Commit message" });
+    // Unchecked files by repo root: a local-only file stays out of every commit while the panel lives.
+    this.excludedByRoot = new Map();
+    this.input = TextareaState.new({ placeholder: "Commit message (⌘Enter to commit)" });
+    this.input.set_auto_grow(MESSAGE_ROWS.min, MESSAGE_ROWS.max);
     this.input.on("change", (_e, cx) => {
       const hadMessage = Boolean(this.message.trim());
       this.message = this.input.value();
       if (hadMessage !== Boolean(this.message.trim())) cx.notify();
     });
-    this.input.on("submit", (_e, cx) => this.commit(cx));
+    this.input.on("submit", (e, cx) => {
+      if (isCommitKey(e)) {
+        this.commit(cx);
+      }
+    });
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.refresh(cx);
@@ -149,6 +159,41 @@ export default class Changes extends View {
 
   clearRepos() {
     this.repos = []; this.repoCount = 0; this.multi = false;
+  }
+
+  excludedOf(root) {
+    if (!this.excludedByRoot.has(root)) {
+      this.excludedByRoot.set(root, new Set());
+    }
+    return this.excludedByRoot.get(root);
+  }
+
+  toggleFile(repo, path, cx) {
+    const excluded = this.excludedOf(repo.root);
+    if (excluded.has(path)) {
+      excluded.delete(path);
+    } else {
+      excluded.add(path);
+    }
+    cx.notify();
+  }
+
+  toggleAllFiles(repo, cx) {
+    const excluded = this.excludedOf(repo.root);
+    const checkAll = checkState(repo.files, excluded) !== "all";
+    for (const { path } of repo.files) {
+      if (checkAll) {
+        excluded.delete(path);
+      } else {
+        excluded.add(path);
+      }
+    }
+    cx.notify();
+  }
+
+  checkedPaths() {
+    const repo = this.committable();
+    return repo ? includedPaths(repo.files, this.excludedOf(repo.root)) : [];
   }
 
   resetFolds() {
@@ -279,13 +324,13 @@ export default class Changes extends View {
   }
 
   commit(cx) {
-    const repo = this.committable();
-    if (!this.message.trim() || !repo || this.busy || this.loading || this.context?.key !== this.key()) return;
+    const repo = this.committable(), paths = this.checkedPaths();
+    if (!this.message.trim() || !repo || !paths.length || this.busy || this.loading || this.context?.key !== this.key()) return;
     const root = repo.root, on = this.on, context = this.context, message = this.message.trim();
     this.busy = true; this.note = null;
     cx.spawn(async (cx) => {
       try {
-        for (const args of [["add", "-A"], ["commit", "-m", message]]) {
+        for (const args of commitCommands(message, paths)) {
           const r = await exec("git", args, { cwd: root, on });
           if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
         }
@@ -296,9 +341,17 @@ export default class Changes extends View {
     cx.notify();
   }
 
+  checkbox(id, state, t, toggle) {
+    const on = state !== "none";
+    return div().id(id).size(14).flex_none().flex().items_center().justify_center().rounded(3).border_1().border_color(on ? t.accent : t.border).when(on, (e) => e.bg(t.accent)).text_size(10).text_color(t.accent_foreground).cursor_pointer()
+      .on_click((_e, cx) => { cx.stop_propagation(); toggle(cx); })
+      .child(CHECK_GLYPH[state]);
+  }
+
   fileRow(repo, f, t, commit, indent) {
     const parts = f.path.split("/"), name = parts.pop(), key = fileKey(repo, commit, f);
     return h_flex().id(`change-${key}`).h(ROW_HEIGHT).flex_none().px(8).gap(8).items_center().rounded(7).cursor_pointer().ml(indent + (commit ? COMMIT_FILES_INDENT : 0)).when(this.open === key, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.pick(repo, f, commit, cx))
+      .when(!commit && !this.multi, (e) => e.child(this.checkbox(`check-${key}`, this.excludedOf(repo.root).has(f.path) ? "none" : "all", t, (cx) => this.toggleFile(repo, f.path, cx))))
       .child(div().w(14).flex_none().text_size(11).text_color(statusColor(f.status, t)).child(f.status))
       .child(h_flex().flex_1().min_w(0).gap(6)
         .child(div().flex_none().max_w(260).truncate().text_color(statusColor(f.status, t)).child(name))
@@ -307,10 +360,11 @@ export default class Changes extends View {
       .when(f.del > 0, (e) => e.child(div().flex_none().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
   }
 
-  groupHeader(group, t, { short, title, add, del }, indent) {
+  groupHeader(group, t, { short, title, add, del, check }, indent) {
     const arrow = this.collapsed.has(group) ? "▸" : "▾";
     return h_flex().id(`group-${group}`).h(ROW_HEIGHT).flex_none().px(8).gap(6).items_center().rounded(7).cursor_pointer().ml(indent).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.toggle(group, cx))
       .child(div().w(14).flex_none().text_size(11).text_color(t.muted).child(arrow))
+      .when(Boolean(check), (e) => e.child(this.checkbox(`check-${group}`, check.state, t, check.toggle)))
       .when(Boolean(short), (e) => e.child(div().flex_none().text_size(11).text_color(t.dim).child(short)))
       .child(div().flex_1().min_w(0).truncate().font_semibold().child(title))
       .when(add > 0, (e) => e.child(div().flex_none().text_size(11).text_color(t.ansi2).child(`+${add}`)))
@@ -319,7 +373,8 @@ export default class Changes extends View {
 
   localSection(repo, t, indent) {
     const group = groupKey(repo.root, LOCAL_GROUP);
-    const header = this.groupHeader(group, t, { title: `Local changes (${repo.files.length})`, ...sumChanges(repo.files) }, indent);
+    const check = this.multi || !repo.files.length ? null : { state: checkState(repo.files, this.excludedOf(repo.root)), toggle: (cx) => this.toggleAllFiles(repo, cx) };
+    const header = this.groupHeader(group, t, { title: `Local changes (${repo.files.length})`, ...sumChanges(repo.files), check }, indent);
     if (this.collapsed.has(group)) {
       return [header];
     }
@@ -374,7 +429,7 @@ export default class Changes extends View {
     if (this.key() !== this.context?.key) this.refresh(cx);
     const t = theme(), files = this.repos.flatMap((r) => r.files), { add, del } = sumChanges(files);
     const badge = this.multi ? `${files.length} files · ${this.repos.length}/${this.repoCount} repos` : `${files.length} files`;
-    const enabled = Boolean(this.message.trim() && this.committable() && !this.busy && !this.loading);
+    const enabled = Boolean(this.message.trim() && this.checkedPaths().length && !this.busy && !this.loading);
     return v_flex().id("changes").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "escape" && this.typing) { this.typing = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
@@ -389,8 +444,8 @@ export default class Changes extends View {
         .child(Scrollbar.vertical("changes-list").absolute().inset_0()))
       .when(this.repos.some((r) => r.limited), el => el.child(div().px(12).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files")))
       .when(Boolean(this.note), (e) => e.child(div().px(10).pb(8).text_size(11).text_color(t.ansi1).child(this.note)))
-      .when(!this.multi, (e) => e.child(h_flex().flex_none().p(10).gap(8).border_t(1).border_color(t.border)
-        .child(div().id("commit-message").flex_1().min_w(0).h(32).px(10).flex().items_center().rounded(8).border_1().border_color(this.typing ? t.accent : t.border).cursor_text().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(this.input).h_full().text_size(12).text_color(t.foreground)))
+      .when(!this.multi, (e) => e.child(h_flex().flex_none().p(10).gap(8).items_end().border_t(1).border_color(t.border)
+        .child(div().id("commit-message").flex_1().min_w(0).min_h(32).px(10).py(7).rounded(8).border_1().border_color(this.typing ? t.accent : t.border).cursor_text().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Textarea.new(this.input).w_full().text_size(12).text_color(t.foreground)))
         .child(div().id("commit").h(32).px(14).flex().items_center().rounded(8).bg(enabled ? t.solid : t.raised).text_color(enabled ? t.solid_foreground : t.dim).text_size(12).when(enabled, (e) => e.cursor_pointer()).on_click((_e, cx) => this.commit(cx)).child(this.busy ? "Committing…" : "Commit"))));
   }
 }
