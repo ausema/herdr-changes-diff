@@ -4,6 +4,7 @@ import { shared, exec, readTextFile, watchFolder, theme, settings, nextCommand }
 import { sideBySideRows, changedSpan, untab, limitRows } from "./side-by-side.js";
 import { diffSource, touchesFile, commitDiffArgs, unifiedFrom, sideLabels } from "./source.js";
 import { changeBlocks, blockEnd, anchorRow, nextBlock, previousBlock } from "./navigation.js";
+import { longestLine, changeColumn, clampScroll, wheelScroll, revealScroll, visibleSlice } from "./horizontal.js";
 
 const TARGET_KEY = "diff-ij.target";
 // Reads write nothing under .git, so the folder watch does not trigger itself.
@@ -22,6 +23,7 @@ const NEXT_CHANGE_KEY = "f7";
 const PREVIOUS_CHANGE_KEY = "shift-f7";
 const FOCUS_COMMAND = "focus";
 const CURRENT_CHANGE_BAR_WIDTH = 3;
+const SIDE_PADDING = 10;
 
 const rowHeight = (size) => Math.ceil(size * 1.8);
 const charWidth = (size) => size * 0.64;
@@ -110,6 +112,8 @@ export default class Diff extends View {
     this.scroll = VirtualListScrollHandle.new();
     this.blocks = [];
     this.current = null;
+    this.scrollX = 0;
+    this.columns = 0;
     this.takeFocusOnCommand(cx);
   }
 
@@ -133,6 +137,8 @@ export default class Diff extends View {
     this.source = null;
     this.blocks = [];
     this.current = null;
+    this.scrollX = 0;
+    this.columns = 0;
     this.jumpToFirstPending = true;
     this.notice = target ? null : "Select a file in Changes";
     this.watch?.cancel();
@@ -157,6 +163,8 @@ export default class Diff extends View {
         }
         const view = lines ? viewRows(lines) : { rows: [], truncated: false, add: 0, del: 0 };
         this.rows = view.rows;
+        this.columns = longestLine(view.rows);
+        this.scrollX = clampScroll(this.scrollX, this.horizontalView());
         this.truncated = view.truncated;
         this.changes = { add: view.add, del: view.del };
         this.source = source;
@@ -197,6 +205,22 @@ export default class Diff extends View {
   jumpTo(index) {
     this.current = index;
     this.scroll.scroll_to_item(this.blocks[index], "center");
+    this.scrollX = revealScroll(this.scrollX, changeColumn(this.rows[this.blocks[index]]), this.horizontalView());
+  }
+
+  // How many columns one side shows: the list's width less the two number columns and the side's padding.
+  horizontalView() {
+    const size = settings().font_size, gutter = this.gutter(size);
+    const visibleWidth = Math.max(0, (this.scroll.viewport_size().width - 2 * gutter) / 2 - 2 * SIDE_PADDING);
+    return { columns: this.columns, charWidth: charWidth(size), visibleColumns: Math.floor(visibleWidth / charWidth(size)) };
+  }
+
+  scrollSideways(event, cx) {
+    const next = wheelScroll(this.scrollX, event, this.horizontalView());
+    if (next !== null && next !== this.scrollX) {
+      this.scrollX = next;
+      cx.notify();
+    }
   }
 
   visibleRows() {
@@ -252,18 +276,19 @@ export default class Diff extends View {
   }
 
   half(side, span, tint) {
-    const el = h_flex().flex_1().min_w(0).h_full().px(10).overflow_hidden().whitespace_nowrap().when(Boolean(tint), (e) => e.bg(tint.color + tint.alpha.line));
+    const el = h_flex().flex_1().min_w(0).h_full().px(SIDE_PADDING).overflow_hidden().whitespace_nowrap().when(Boolean(tint), (e) => e.bg(tint.color + tint.alpha.line));
     if (!side) {
       return el;
     }
-    if (!span || span[0] === span[1]) {
-      return el.child(div().flex_none().child(side.text || " "));
+    const { text, span: shown } = visibleSlice(side.text, span, this.scrollX);
+    if (!shown || shown[0] === shown[1]) {
+      return el.child(div().flex_none().child(text || " "));
     }
-    const [start, end] = span;
+    const [start, end] = shown;
     return el
-      .child(div().flex_none().child(side.text.slice(0, start)))
-      .child(div().flex_none().rounded(2).bg(tint.color + tint.alpha.span).child(side.text.slice(start, end)))
-      .child(div().flex_none().child(side.text.slice(end)));
+      .child(div().flex_none().child(text.slice(0, start)))
+      .child(div().flex_none().rounded(2).bg(tint.color + tint.alpha.span).child(text.slice(start, end)))
+      .child(div().flex_none().child(text.slice(end)));
   }
 
   number(side, width, color) {
@@ -352,7 +377,8 @@ export default class Diff extends View {
       })
       .child(this.header(t))
       .child(this.labels(t, gutter))
-      .child(div().flex_1().min_h(0).relative().font_family(settings().font_family ?? DEFAULT_FONT).text_size(size)
+      .child(div().id("diff-body").flex_1().min_h(0).relative().font_family(settings().font_family ?? DEFAULT_FONT).text_size(size)
+        .on_scroll_wheel((e, cx) => this.scrollSideways(e, cx))
         .child(v_virtual_list("diff-rows", this.rows.length, rowHeight(size), (i) => String(i),
           (range) => this.rows.slice(range.start, range.end).map((row, offset) => this.row(row, t, size, gutter, isInCurrentBlock(range.start + offset)))).track_scroll(this.scroll).size_full())
         .child(Scrollbar.vertical("diff-rows").viewport_from_layout().absolute().inset_0())
