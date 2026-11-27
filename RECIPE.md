@@ -33,6 +33,13 @@ change marked, so a big file is easy to walk through.
   `Commit` button (`solid` / `solid_foreground` when there is a message,
   `raised` / `dim` otherwise; `Committing…` while it runs). Errors show in
   `ansi1` 11 px above it.
+- **A folder of several repos** (the folder isn't a repo, its subfolders
+  are): one foldable group per repo with something to show, by path,
+  titled `repo-name · branch` with its `+`/`−`; its `Local changes` and
+  commit groups are nested inside, indented 14 px (an error reading that
+  repo shows in `ansi1` instead). The badge reads `N files · shown/total
+  repos`; with no repo to show, `No changes in N repositories`. No commit
+  box.
 - Messages instead of the list: `Not a git repository`, `Loading changes…`,
   `No folder`. Limits shown in `dim` 11 px: `Showing the first 1,000 changed
   files`, `Showing the last 50 unpushed commits`.
@@ -71,6 +78,13 @@ change marked, so a big file is easy to walk through.
   remote machine); while the Diff tab or another mod has the focus it keeps
   the space's last location. It refreshes every 10 s and on every change the
   folder watch reports (local folders only).
+- **Several repos**: when the folder isn't inside a repo, `find <folder>
+  -mindepth 2 -maxdepth 2 -name .git` gives the repos one level down,
+  loaded 4 at a time. A repo's first call is `git status --branch`; one with
+  no changes and level with its upstream (no `[ahead N]`, not `[gone]`)
+  stops there and is hidden. The rest load as a single repo does; one still
+  with nothing to show is hidden too. No folder watch in this mode: the 10 s
+  poll is enough. Clicking a file hands that repo's root to the Diff tab.
 - **Groups**: click a group header to fold or unfold it. New unpushed commits
   arrive folded; a group you opened or closed keeps its state. Unpushed means
   `@{upstream}..HEAD`, or commits on no remote branch when there is no
@@ -80,6 +94,7 @@ change marked, so a big file is easy to walk through.
   Clicking the same file again reloads it.
 - **Commit**: Enter in the input or the button runs `git add -A` then
   `git commit -m <message>` in the repo root; the message clears on success.
+  Not offered for a folder of several repos.
   `Escape` while typing leaves the input.
 - **Diff contents**: a local file is diffed against `HEAD` with the whole file
   as context; an untracked file (or any file in a repo with no commits) shows
@@ -99,6 +114,8 @@ change marked, so a big file is easy to walk through.
 - Two mods, no layout and no `keys.json`:
   - `mods/changes-ij/`: `main.js` (the panel view), `commits.js` (unpushed
     commits: `git log` / `git show --raw --numstat` args and parsers),
+    `repos.js` (a folder of several repos: `find` args, `status --branch`
+    parser, the quiet check, bounded parallel loading),
     `location.js` (which folder to follow), `changes.svg`, tests. `mod.json`:
     `"place": "none"`, cloned from Herdr's shipped `changes` 0.1.17.
   - `mods/diff-ij/`: `main.js` (the tab view), `side-by-side.js` (unified diff
@@ -113,7 +130,7 @@ change marked, so a big file is easy to walk through.
   `setShared`/`shared`, `nextCommand`. `gpui-base`: `v_flex`, `h_flex`,
   `Scrollbar`, `Input`/`InputState`, `v_virtual_list`,
   `VirtualListScrollHandle`.
-- Programs: only `git` (read-only commands with `--no-optional-locks -c
+- Programs: `find` (a folder of several repos) and `git` (read-only commands with `--no-optional-locks -c
   core.fsmonitor=false -c diff.autoRefreshIndex=false`, plus `add -A` and
   `commit` from the Commit button). No network.
 
@@ -134,6 +151,10 @@ change marked, so a big file is easy to walk through.
   per line, 400,000 characters of an untracked file.
 - The Commit button stages everything (`git add -A`); there is no partial
   staging, revert or editing from the diff.
+- Several repos: only one level down is searched; a folder that is itself
+  inside a repo (a home folder kept in git) shows that repo instead. A repo
+  with no remote lists its commits as unpushed (up to 50), as in a single
+  repo.
 
 ## Done when
 
@@ -147,5 +168,9 @@ change marked, so a big file is easy to walk through.
   highlighted, the counter at `1/N` and the first change marked.
 - `↓` / `F7` walks `2/N` … `N/N` and back to `1/N`; `↑` / `Shift+F7` goes the
   other way; a file without changes shows the buttons dimmed.
+- In a folder holding a repo with an edited file and a clean one level with
+  its upstream, the panel shows only the first, as `name · branch`, the badge
+  reads `1 files · 1/2 repos`, there is no commit box, and clicking the file
+  opens its diff.
 - Saving the file changes the diff without picking it again; typing a message
   and pressing Commit empties `Local changes` and adds a commit group.
