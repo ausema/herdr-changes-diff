@@ -3,6 +3,7 @@ import { v_flex, h_flex, TextareaState, Textarea, Scrollbar } from "gpui-base";
 import { spaces, panes, focused, exec, watchFolder, theme, run, setShared } from "herdr";
 import { resolveLocation } from "./location.js";
 import { MAX_COMMITS, logArgs, parseLog, commitFilesArgs, parseCommitFiles, rowKey } from "./commits.js";
+import { CommitDrafts } from "./drafts.js";
 import { includedPaths, checkState, commitCommands, isCommitKey } from "./staging.js";
 import { findReposArgs, repoRoots, repoName, parseStatus, isQuiet, groupKey, mapWithLimit } from "./repos.js";
 
@@ -139,11 +140,13 @@ export default class Changes extends View {
     this.clearRepos(); this.resetFolds();
     // Unchecked files by repo root: a local-only file stays out of every commit while the panel lives.
     this.excludedByRoot = new Map();
+    this.drafts = new CommitDrafts();
     this.input = TextareaState.new({ placeholder: "Commit message (⌘Enter to commit)" });
     this.input.set_auto_grow(MESSAGE_ROWS.min, MESSAGE_ROWS.max);
     this.input.on("change", (_e, cx) => {
       const hadMessage = Boolean(this.message.trim());
       this.message = this.input.value();
+      this.keepDraft();
       if (hadMessage !== Boolean(this.message.trim())) cx.notify();
     });
     this.input.on("submit", (e, cx) => {
@@ -245,6 +248,23 @@ export default class Changes extends View {
   show(repos, { multi, repoCount, on }) {
     this.repos = repos; this.multi = multi; this.repoCount = repoCount; this.on = on; this.error = null;
     this.foldNewCommits(repos);
+    this.restoreDraft();
+  }
+
+  keepDraft() {
+    const repo = this.committable();
+    if (repo) {
+      this.drafts.keep(this.on, repo.root, this.message);
+    }
+  }
+
+  // Back in a repo, its unfinished message comes back; only a real change touches the input.
+  restoreDraft() {
+    const repo = this.committable(), draft = repo ? this.drafts.get(this.on, repo.root) : "";
+    if (draft !== this.message) {
+      this.message = draft;
+      this.input.set_value(draft);
+    }
   }
 
   where() {
@@ -334,6 +354,7 @@ export default class Changes extends View {
           const r = await exec("git", args, { cwd: root, on });
           if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
         }
+        this.drafts.drop(on, root);
         if (this.current(context)) { this.message = ""; this.input.set_value(""); }
       } catch (e) { if (this.current(context)) this.note = `Commit failed: ${e}`; }
       finally { this.busy = false; this.refresh(cx); cx.notify(); }

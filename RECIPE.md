@@ -105,12 +105,14 @@ change marked, so a big file is easy to walk through.
   `git commit -m <message> -- <checked files>` in the repo root, both with
   `--literal-pathspecs`. Only the checked files are committed: unchecked
   ones and anything else already staged stay out. The message clears on
-  success.
+  success. Not offered for a folder of several repos. `Escape` while typing
+  leaves the input.
+- **Unfinished message**: each repo keeps its own while the panel is open.
+  Looking at another space, folder or repo and coming back brings it back;
+  it is only dropped once committed.
 - **Checkboxes**: every local file starts checked. Unchecking one keeps it
   out of later commits too, while the panel is open; the header checkbox
   checks all unless all are checked, then unchecks all.
-  Not offered for a folder of several repos.
-  `Escape` while typing leaves the input.
 - **Diff contents**: a local file is diffed against `HEAD` with the whole file
   as context; an untracked file (or any file in a repo with no commits) shows
   the file on disk as all added; a commit's file shows that commit against its
@@ -136,7 +138,7 @@ change marked, so a big file is easy to walk through.
   - `mods/changes-ij/`: `main.js` (the panel view), `commits.js` (unpushed
     commits: `git log` / `git show --raw --numstat` args and parsers),
     `staging.js` (which files the Commit button commits, and its git
-    commands), `repos.js` (a folder of several repos: `find` args, `status --branch`
+    commands), `drafts.js` (the unfinished message of each repo), `repos.js` (a folder of several repos: `find` args, `status --branch`
     parser, the quiet check, bounded parallel loading),
     `location.js` (which folder to follow), `changes.svg`, tests. `mod.json`:
     `"place": "none"`, cloned from Herdr's shipped `changes` 0.1.17.
