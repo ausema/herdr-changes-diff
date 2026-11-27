@@ -106,6 +106,12 @@ change marked, so a big file is easy to walk through.
   to the previous one, wrapping around at the ends; the change is centered and
   marked. Jumps count from the marked change while it is on screen, otherwise
   from the middle of the view. Opening a file jumps to its first change.
+- **Long lines**: lines don't wrap. A sideways trackpad swipe, or Shift with
+  the mouse wheel, scrolls both sides together, up to where the longest line
+  ends; vertical scrolling is unchanged. A jump to a change that starts out
+  of view scrolls sideways so it starts 4 columns from the left edge, and
+  back to the start when the change begins left of the view. Opening another
+  file starts at column 0.
 - **Keys** work while the Diff tab has the keyboard: click it, or reach it
   with pane navigation (`"focusable": true`).
 
@@ -121,7 +127,8 @@ change marked, so a big file is easy to walk through.
   - `mods/diff-ij/`: `main.js` (the tab view), `side-by-side.js` (unified diff
     to side-by-side rows, changed span, tab expansion), `source.js` (diff
     source, labels, watch filter, commit args), `navigation.js` (change
-    blocks and jumps), tests. `mod.json`: `"place": "none"`,
+    blocks and jumps), `horizontal.js` (sideways scroll in columns: clamp,
+    wheel, reveal, the visible part of a line), tests. `mod.json`: `"place": "none"`,
     `"title": "Diff"`, `"focusable": true`.
 - The panel hands the file to the tab with `setShared("diff-ij.target",
   {root, path, on, commit, requested})`; the tab reads `shared("diff-ij.target")`.
@@ -145,7 +152,13 @@ change marked, so a big file is easy to walk through.
 - Git reads must not write under `.git`, or the folder watch triggers itself
   and refreshes forever.
 - The diff list is virtual: every row must have the same height, and the jump
-  math uses that height and `VirtualListScrollHandle.offset()`.
+  math uses that height and `VirtualListScrollHandle.offset()`. That is why
+  long lines scroll sideways instead of wrapping.
+- Sideways scrolling cuts each line at a column instead of moving it by
+  pixels, so it relies on a monospace font: wide characters (CJK, emoji)
+  shift what follows them. How far it scrolls is sized with an estimated
+  character width (0.64 × font size, a bit wider than most fonts draw), so
+  it can scroll a little past the end of the longest line.
 - Theme colors are appended a two-digit hex alpha: they must be `#rrggbb`.
 - Limits: 1,000 files, 50 unpushed commits, 5,000 diff rows, 4,000 columns
   per line, 400,000 characters of an untracked file.
